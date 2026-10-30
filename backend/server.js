@@ -1,13 +1,10 @@
+import 'dotenv/config';
 import http from 'http';
-import dotenv from 'dotenv';
 import { Server } from 'socket.io';
 import connectDB from './config/db.js';
 import app from './app.js';
 import logger from './config/logger.js';
 import { setupSockets } from './sockets/socketHandler.js';
-
-// Load environment variables
-dotenv.config();
 
 // Connect to MongoDB
 connectDB();

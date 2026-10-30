@@ -46,6 +46,10 @@ import {
 } from "lucide-react";
 import { GoogleLogin } from "@react-oauth/google";
 import { apiUrl, getSocketOrigin } from "./lib/apiClient";
+import { AdoptionPublicView } from "./AdoptionPublicView";
+import { BeforeAfterSlider } from "./BeforeAfterSlider";
+import { LostFoundSection } from "./LostFoundSection";
+import { OurVolunteersSection } from "./OurVolunteersSection";
 
 // ─────────────────────────────────────────────
 // TYPES
@@ -65,6 +69,7 @@ export type Page =
   | "dashboard"
   | "admin"
   | "discover"
+  | "lost-found"
   | "ngo"
   | "rewards";
 export type AuthMode = "google" | "otp";
@@ -186,6 +191,8 @@ interface AppContextType {
   setPage: (p: Page) => void;
   user: AppUser | null;
   setUser: (u: AppUser | null) => void;
+  authLoading: boolean;
+  logout: () => void;
   reports: AnimalReport[];
   addReport: (r: AnimalReport) => void;
   removeReport: (id: string) => void;
@@ -1289,7 +1296,7 @@ function ReporterDashboard() {
             {/* Quick Nav Cards */}
             <div className="grid grid-cols-3 gap-6">
               {[
-                { label: "Lost & Found", desc: "AI Visual Match", icon: "🔍", page: "discover", theme: "blue" },
+                { label: "Lost & Found Pets", desc: "AI Visual Match", icon: "🔍", page: "lost-found", theme: "blue" },
                 { label: "Adoption", desc: "Find a friend", icon: "🐾", page: "discover", theme: "pink" },
                 { label: "Donate", desc: "Fund a rescue", icon: "❤️", page: "ngo", theme: "orange" },
               ].map((card) => {
@@ -1396,6 +1403,17 @@ function ReporterDashboard() {
                               This report failed verification and has been marked as invalid by an Admin.
                             </div>
                           )}
+                        
+                          {/* Recovery Before & After Comparison Slider */}
+                          {report.treatedImageUrl && report.imageDataUrl && (
+                            <div className="mt-4 pt-3 border-t border-white/5">
+                              <BeforeAfterSlider
+                                beforeSrc={report.imageDataUrl}
+                                afterSrc={report.treatedImageUrl}
+                                animalName={`${report.animalType} #${report.id}`}
+                              />
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1461,6 +1479,9 @@ function ReporterDashboard() {
             </div>
           </div>
         </div>
+
+        {/* Our Volunteers Section (User Panel only) */}
+        <OurVolunteersSection />
       </div>
     </div>
   );
@@ -1468,52 +1489,12 @@ function ReporterDashboard() {
 // ─────────────────────────────────────────────
 // DISCOVER PAGE (Lost & Found + Adoption)
 // ─────────────────────────────────────────────
-type AdoptionRow = {
-  id: string;
-  name: string;
-  type: string;
-  breed: string;
-  age: string;
-  location: string;
-  image: string;
-  vaccinated: boolean;
-  description?: string;
-};
-
 function DiscoverPage() {
   const { setPage, reports } = useApp();
-  const [tab, setTab] = useState<"lost" | "adoption">("lost");
+  const [tab, setTab] = useState<"lost" | "adoption">("adoption");
   const [filter, setFilter] = useState("All");
-  const [selectedPet, setSelectedPet] = useState<AdoptionRow | null>(null);
-  const [adoptionPets, setAdoptionPets] = useState<AdoptionRow[]>([]);
-  const [adoptionLoading, setAdoptionLoading] = useState(false);
   const [aiMatches, setAiMatches] = useState<any[] | null>(null);
   const [loadingMatch, setLoadingMatch] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (tab !== "adoption") return;
-    setAdoptionLoading(true);
-    fetch(apiUrl("/api/adoptions"))
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.success && Array.isArray(d.data)) setAdoptionPets(d.data);
-        else setAdoptionPets([]);
-      })
-      .catch(() => setAdoptionPets([]))
-      .finally(() => setAdoptionLoading(false));
-  }, [tab]);
-
-  const filteredAdoption = adoptionPets.filter((pet) => {
-    if (filter === "All") return true;
-    if (filter === "Dog") return pet.type === "Dog";
-    if (filter === "Cat") return pet.type === "Cat";
-    if (filter === "Vaccinated") return pet.vaccinated;
-    return true;
-  });
-
-  useEffect(() => {
-    setFilter("All");
-  }, [tab]);
 
   const runAiMatch = async (reportId: string) => {
     setLoadingMatch(reportId);
@@ -1535,20 +1516,18 @@ function DiscoverPage() {
         <div className="max-w-2xl mx-auto px-5 py-4">
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-white font-bold text-lg" style={{ fontFamily: "'Sora', sans-serif" }}>Discover</h1>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
-              <input placeholder="Search..." className="bg-white/5 border border-white/10 rounded-xl pl-8 pr-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500/50 w-40" />
-            </div>
           </div>
           <div className="flex bg-white/5 rounded-xl p-1 border border-white/10">
-            <button onClick={() => setTab("lost")} className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === "lost" ? "bg-sky-500 text-white" : "text-white/50"}`}>🔍 Lost & Found</button>
-            <button onClick={() => setTab("adoption")} className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === "adoption" ? "bg-pink-500 text-white" : "text-white/50"}`}>🐾 Adoption</button>
+            <button onClick={() => setTab("adoption")} className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === "adoption" ? "bg-pink-500 text-white shadow-lg shadow-pink-500/30" : "text-white/50 hover:text-white/80"}`}>🐾 Dog Adoption</button>
+            <button onClick={() => setTab("lost")} className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === "lost" ? "bg-sky-500 text-white shadow-lg shadow-sky-500/30" : "text-white/50 hover:text-white/80"}`}>🔍 Lost & Found</button>
           </div>
         </div>
       </header>
 
       <div className="max-w-2xl mx-auto px-5 py-5">
-        {tab === "lost" ? (
+        {tab === "adoption" ? (
+          <AdoptionPublicView />
+        ) : (
           <>
             <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
               {["All", "Lost", "Found", "AI Match"].map((f) => (
@@ -1611,71 +1590,8 @@ function DiscoverPage() {
               <PawPrint className="w-4 h-4" /> Report Lost / Found Pet
             </button>
           </>
-        ) : (
-          <>
-            <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
-              {["All", "Dog", "Cat", "Vaccinated"].map((f) => (
-                <button key={f} onClick={() => setFilter(f)} className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${filter === f ? "bg-pink-500/20 border-pink-500/50 text-pink-300" : "bg-white/4 border-white/10 text-white/45"}`}>{f}</button>
-              ))}
-            </div>
-            {adoptionLoading ? (
-              <p className="text-white/40 text-sm text-center py-12">Loading adoption listings…</p>
-            ) : filteredAdoption.length === 0 ? (
-              <p className="text-white/40 text-sm text-center py-12">No listings match this filter.</p>
-            ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {filteredAdoption.map((pet) => (
-                <div key={pet.id} onClick={() => setSelectedPet(pet)} className="bg-white/[0.04] border border-white/10 rounded-2xl overflow-hidden hover:border-pink-500/30 hover:scale-[1.02] transition-all cursor-pointer group">
-                  <div className="relative aspect-square">
-                    <img src={pet.image} alt={pet.name} className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                    {pet.vaccinated && (
-                      <div className="absolute top-2 right-2 bg-emerald-500/90 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-lg">✓ Vacc</div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 p-3">
-                      <p className="text-white font-bold text-sm">{pet.name}</p>
-                      <p className="text-white/60 text-[10px]">{pet.breed} · {pet.age}</p>
-                    </div>
-                  </div>
-                  <div className="p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-1 text-white/40 text-[10px]"><MapPin className="w-2.5 h-2.5" />{pet.location}</div>
-                    <button type="button" className="px-3 py-1.5 rounded-lg bg-pink-500/20 border border-pink-500/30 text-pink-400 text-[10px] font-bold hover:bg-pink-500/30 transition-all">Adopt Me 🐾</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            )}
-          </>
         )}
       </div>
-
-      {/* Adoption Modal */}
-      {selectedPet && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setSelectedPet(null)}>
-          <div className="bg-[#0E1A12] border border-white/12 rounded-3xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()} style={{ animation: "fadeUp 0.3s ease both" }}>
-            <img src={selectedPet.image} alt={selectedPet.name} className="w-full aspect-video object-cover" />
-            <div className="p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h3 className="text-white font-bold text-xl" style={{ fontFamily: "'Sora', sans-serif" }}>{selectedPet.name}</h3>
-                  <p className="text-white/50 text-sm">{selectedPet.breed} · {selectedPet.age}</p>
-                </div>
-                {selectedPet.vaccinated && <span className="bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-semibold px-2 py-1 rounded-lg">✓ Vaccinated</span>}
-              </div>
-              <p className="text-white/50 text-sm mb-2 flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-orange-400" />{selectedPet.location}</p>
-              {selectedPet.description && (
-                <p className="text-white/40 text-xs mb-4 leading-relaxed">{selectedPet.description}</p>
-              )}
-              <div className="flex gap-2">
-                <button onClick={() => setSelectedPet(null)} className="flex-1 py-3 rounded-xl bg-white/6 border border-white/10 text-white/60 text-sm font-semibold">Close</button>
-                <button type="button" className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-pink-500 to-pink-600 text-white text-sm font-bold shadow-lg shadow-pink-500/30">
-                  🐾 Adopt {selectedPet.name}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1708,7 +1624,7 @@ function NGOPage() {
   const [upiPayload, setUpiPayload] = useState<UpiDonationPayload | null>(null);
   const [payBusy, setPayBusy] = useState(false);
   const [payMethods, setPayMethods] = useState<{ upi: boolean; stripe: boolean }>({ upi: false, stripe: false });
-  const [ngos, setNgos] = useState<any[]>(MOCK_NGOS);
+  const [ngos, setNgos] = useState<any[]>([]);
 
   useEffect(() => {
     fetch(apiUrl("/api/donations/methods"))
@@ -2321,16 +2237,18 @@ function RewardsPage() {
 // ─────────────────────────────────────────────
 // BOTTOM NAV
 // ─────────────────────────────────────────────
+// BOTTOM NAV
+// ─────────────────────────────────────────────
 function BottomNav({ role }: { role: "reporter" | "admin" }) {
-  const { page, setPage, setUser, user, reports } = useApp();
+  const { page, setPage, user, reports, logout } = useApp();
   const userReports = reports.filter((r) => r.reporterName === user?.name);
 
   const reporterItems = [
     { id: "reporter" as Page, label: "Home", icon: <LayoutDashboard className="w-5 h-5" /> },
-    { id: "discover" as Page, label: "Discover", icon: <Compass className="w-5 h-5" /> },
+    { id: "lost-found" as Page, label: "Lost & Found", icon: <Search className="w-5 h-5 text-sky-400" /> },
     { id: "report-form" as Page, label: "Report", icon: <AlertTriangle className="w-5 h-5" />, featured: true },
+    { id: "discover" as Page, label: "Adopt", icon: <Compass className="w-5 h-5" /> },
     { id: "ngo" as Page, label: "NGOs", icon: <Building2 className="w-5 h-5" /> },
-    { id: "rewards" as Page, label: "Rewards", icon: <Coins className="w-5 h-5" /> },
   ];
 
   const adminItems = [
@@ -2370,13 +2288,8 @@ function BottomNav({ role }: { role: "reporter" | "admin" }) {
           )
         )}
         <button
-          onClick={() => {
-            localStorage.removeItem("pawrescue_token");
-            localStorage.removeItem("pawrescue_user");
-            setUser(null);
-            setPage("landing");
-            window.location.reload();
-          }}
+          onClick={logout}
+          title="Log out"
           className="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl text-white/30 hover:text-red-400 transition-all"
         >
           <LogOut className="w-5 h-5" />
@@ -2443,6 +2356,7 @@ export default function App() {
     '/discover': 'discover',
     '/ngo': 'ngo',
     '/rewards': 'rewards',
+    '/lost-found': 'lost-found',
     '/admin': 'admin'
   };
 
@@ -2458,14 +2372,25 @@ export default function App() {
       'discover': '/discover',
       'ngo': '/ngo',
       'rewards': '/rewards',
+      'lost-found': '/lost-found',
       'admin': '/admin'
     };
     navigate(reverseMap[p] || '/');
   }, [navigate]);
 
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [user, setUser] = useState<AppUser | null>(() => {
     const saved = localStorage.getItem("pawrescue_user");
-    if (saved) { try { return JSON.parse(saved); } catch { return null; } }
+    if (saved) {
+      try {
+        const u = JSON.parse(saved);
+        if (u && typeof u === "object" && u.role) {
+          return u;
+        }
+      } catch {
+        return null;
+      }
+    }
     return null;
   });
 
@@ -2474,19 +2399,126 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [imageHashes, setImageHashes] = useState<Set<string>>(new Set());
 
+  const addToast = useCallback((t: Omit<ToastItem, "id">) => {
+    const id = Math.random().toString(36).slice(2);
+    setToasts((prev) => [...prev, { ...t, id }]);
+  }, []);
+
+  const removeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem("pawrescue_token");
+    localStorage.removeItem("pawrescue_user");
+    setUser(null);
+    navigate("/login", { replace: true });
+    addToast({
+      type: "info",
+      title: "Signed Out",
+      message: "You have been logged out successfully.",
+    });
+  }, [navigate, addToast]);
+
+  // Session verification on app load
   useEffect(() => {
-    if (location.pathname === '/' || location.pathname === '/login') {
-      const saved = localStorage.getItem("pawrescue_user");
-      if (saved) {
-        try {
-          const u = JSON.parse(saved);
-          if (u.role && user) {
-            navigate(u.role === "admin" ? "/admin" : "/reporter", { replace: true });
+    let active = true;
+    const token = localStorage.getItem("pawrescue_token");
+
+    if (!token) {
+      localStorage.removeItem("pawrescue_user");
+      setUser(null);
+      setAuthLoading(false);
+      return;
+    }
+
+    const checkSession = async () => {
+      try {
+        const res = await fetch(apiUrl("/api/auth/me"), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!active) return;
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.user) {
+            const verifiedRole: "reporter" | "admin" =
+              data.user.role === "admin" || data.user.role === "ngo_admin" ? "admin" : "reporter";
+            const uid = data.user.id ?? data.user._id;
+            const verifiedUser: AppUser = {
+              ...(uid != null && uid !== "" ? { id: String(uid) } : {}),
+              name: data.user.name,
+              email: data.user.email || "",
+              phone: data.user.phone || "",
+              role: verifiedRole,
+            };
+            setUser(verifiedUser);
+            localStorage.setItem("pawrescue_user", JSON.stringify(verifiedUser));
+          } else {
+            localStorage.removeItem("pawrescue_token");
+            localStorage.removeItem("pawrescue_user");
+            setUser(null);
           }
-        } catch { /* empty */ }
+        } else {
+          // Expired or invalid token
+          localStorage.removeItem("pawrescue_token");
+          localStorage.removeItem("pawrescue_user");
+          setUser(null);
+        }
+      } catch (err) {
+        console.warn("Session check request warning:", err);
+      } finally {
+        if (active) {
+          setAuthLoading(false);
+        }
+      }
+    };
+
+    checkSession();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Protected route & authorization guard
+  useEffect(() => {
+    if (authLoading) return;
+
+    const currentPath = location.pathname;
+    const isPublic = currentPath === "/" || currentPath === "/login";
+
+    if (!user) {
+      if (!isPublic) {
+        navigate("/login", { replace: true, state: { from: currentPath } });
+      }
+      return;
+    }
+
+    const verifiedRole = user.role === "admin" ? "admin" : "reporter";
+
+    if (isPublic) {
+      navigate(verifiedRole === "admin" ? "/admin" : "/reporter", { replace: true });
+      return;
+    }
+
+    // Role boundary checks
+    if (verifiedRole === "admin") {
+      if (currentPath !== "/admin") {
+        navigate("/admin", { replace: true });
+      }
+    } else {
+      if (currentPath === "/admin") {
+        navigate("/reporter", { replace: true });
+        addToast({
+          type: "error",
+          title: "Access Denied",
+          message: "NGO Admin privileges are required to view the Admin panel.",
+        });
       }
     }
-  }, [location.pathname, navigate, user]);
+  }, [authLoading, user, location.pathname, navigate, addToast]);
 
   useEffect(() => {
     const fetchReports = async () => {
@@ -2535,15 +2567,6 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, []);
-
-  const addToast = useCallback((t: Omit<ToastItem, "id">) => {
-    const id = Math.random().toString(36).slice(2);
-    setToasts((prev) => [...prev, { ...t, id }]);
-  }, []);
-
-  const removeToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const addReport = useCallback((r: AnimalReport) => {
@@ -2612,10 +2635,15 @@ export default function App() {
   const ReportWizard = React.lazy(() => import("./CameraModule").then((m) => ({ default: m.ReportWizard })));
 
   const renderPage = () => {
+    if (authLoading) {
+      return <PageLoader />;
+    }
+
     if (!user) {
       if (page === "login") return <LoginPage />;
       return <LandingPage />;
     }
+
     if (user.role === "admin") {
       return (
         <ErrorBoundary>
@@ -2625,7 +2653,8 @@ export default function App() {
         </ErrorBoundary>
       );
     }
-    // Reporter pages
+
+    // Reporter views
     const withNav = (content: React.ReactNode) => (
       <>
         {content}
@@ -2637,6 +2666,11 @@ export default function App() {
       case "reporter": return withNav(<ReporterDashboard />);
       case "report-form": return withNav(<React.Suspense fallback={<PageLoader />}><ReportWizard /></React.Suspense>);
       case "discover": return withNav(<DiscoverPage />);
+      case "lost-found": return withNav(
+        <div className="min-h-screen bg-[#0A0F0D] pb-24 max-w-7xl mx-auto px-4 sm:px-6 py-6">
+          <LostFoundSection />
+        </div>
+      );
       case "ngo": return withNav(<NGOPage />);
       case "rewards": return withNav(<RewardsPage />);
       default: return withNav(<ReporterDashboard />);
@@ -2650,6 +2684,8 @@ export default function App() {
         setPage,
         user,
         setUser,
+        authLoading,
+        logout,
         reports,
         addReport,
         removeReport,

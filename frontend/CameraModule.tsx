@@ -34,6 +34,7 @@ import {
   ArrowRight,
   FlipHorizontal,
   Aperture,
+  Upload,
 } from "lucide-react";
 import { useApp, WizardStep, GeoLocation, AnimalReport, Priority } from "./App";
 import { apiUrl } from "./lib/apiClient";
@@ -85,11 +86,25 @@ function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
   const [flash, setFlash] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          onCapture(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const startCamera = useCallback(async (mode: "environment" | "user") => {
     // Stop previous stream
@@ -98,31 +113,40 @@ function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
     setCameraError(null);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: mode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: mode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch (firstErr) {
+        // Fallback for laptops and desktops without facingMode or 720p constraints
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
 
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
-          videoRef.current?.play();
+          videoRef.current?.play().catch(() => {});
           setCameraReady(true);
         };
       }
     } catch (err: unknown) {
       const error = err as Error;
-      if (error.name === "NotAllowedError") {
-        setCameraError("Camera access denied. Please allow camera permissions in your browser.");
-      } else if (error.name === "NotFoundError") {
-        setCameraError("No camera device found on this device.");
+      if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+        setCameraError("Camera access denied. Please click the camera/lock icon in your browser address bar to allow permissions.");
+      } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+        setCameraError("No webcam found on this device. You can upload a photo from your files instead.");
       } else {
-        setCameraError("Failed to start camera. Please try again.");
+        setCameraError("Camera unavailable or in use by another app. You can retry or upload a photo.");
       }
     }
   }, []);
@@ -178,19 +202,72 @@ function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
+      {/* Top toolbar - Always visible */}
+      <div className="absolute top-0 left-0 right-0 z-20 p-4 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent">
+        <button
+          onClick={onClose}
+          className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center text-white border border-white/20 hover:bg-black/80 transition-all shadow-lg"
+          title="Close camera"
+        >
+          <X className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5 border border-white/20">
+          <div className={`w-2 h-2 rounded-full ${cameraError ? "bg-amber-500" : "bg-red-500 animate-pulse"}`} />
+          <span className="text-white/80 text-xs font-medium">{cameraError ? "CAMERA" : "LIVE"}</span>
+        </div>
+        {!cameraError ? (
+          <button
+            onClick={() => setFacingMode((m) => (m === "environment" ? "user" : "environment"))}
+            className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center text-white border border-white/20 hover:bg-black/80 transition-all"
+            title="Switch camera"
+          >
+            <FlipHorizontal className="w-5 h-5" />
+          </button>
+        ) : (
+          <div className="w-10 h-10" />
+        )}
+      </div>
+
       {/* Camera Viewfinder */}
       <div className="relative flex-1 overflow-hidden">
         {cameraError ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-8">
-            <div className="w-16 h-16 rounded-2xl bg-red-500/20 border border-red-500/30 flex items-center justify-center">
-              <CameraOff className="w-8 h-8 text-red-400" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 p-8 max-w-md mx-auto text-center">
+            <div className="w-20 h-20 rounded-3xl bg-red-500/15 border border-red-500/30 flex items-center justify-center shadow-lg shadow-red-500/10">
+              <CameraOff className="w-10 h-10 text-red-400" />
             </div>
-            <p className="text-red-400 text-center text-sm font-medium">{cameraError}</p>
+            <div>
+              <h3 className="text-white font-semibold text-lg mb-1">Camera Not Available</h3>
+              <p className="text-white/70 text-sm leading-relaxed">{cameraError}</p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 w-full mt-2">
+              <button
+                onClick={() => startCamera(facingMode)}
+                className="flex-1 flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white font-medium text-sm px-5 py-3 rounded-xl border border-white/15 transition-all"
+              >
+                <RotateCcw className="w-4 h-4" /> Retry Camera
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-semibold text-sm px-5 py-3 rounded-xl shadow-lg shadow-emerald-500/25 transition-all"
+              >
+                <Upload className="w-4 h-4" /> Upload Photo
+              </button>
+            </div>
+
             <button
-              onClick={() => startCamera(facingMode)}
-              className="flex items-center gap-2 bg-white/10 hover:bg-white/15 text-white text-sm px-4 py-2 rounded-xl transition-all"
+              onClick={onClose}
+              className="text-white/50 hover:text-white/80 text-xs transition-colors mt-2"
             >
-              <RotateCcw className="w-4 h-4" /> Retry
+              Cancel & Go Back
             </button>
           </div>
         ) : (
@@ -239,33 +316,14 @@ function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
               <div className="absolute left-2/3 top-8 bottom-8 w-px bg-white/8" />
             </div>
 
-            {/* Top toolbar */}
-            <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent">
+            {/* Quick upload option */}
+            <div className="absolute bottom-28 left-0 right-0 flex justify-center">
               <button
-                onClick={onClose}
-                className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white border border-white/20 hover:bg-black/60 transition-all"
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-full px-4 py-2 border border-white/20 text-white/80 hover:text-white text-xs flex items-center gap-2 transition-all"
               >
-                <X className="w-5 h-5" />
+                <Upload className="w-3.5 h-3.5 text-emerald-400" /> Or select photo from device
               </button>
-              <div className="flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full px-3 py-1.5 border border-white/20">
-                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-white/80 text-xs font-medium">LIVE</span>
-              </div>
-              <button
-                onClick={() => setFacingMode((m) => (m === "environment" ? "user" : "environment"))}
-                className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white border border-white/20 hover:bg-black/60 transition-all"
-              >
-                <FlipHorizontal className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* File input blocker notice */}
-            <div className="absolute bottom-32 left-0 right-0 flex justify-center">
-              <div className="bg-black/50 backdrop-blur-sm rounded-full px-4 py-1.5 border border-white/15">
-                <p className="text-white/50 text-[11px] text-center">
-                  📸 Live camera only — file upload disabled
-                </p>
-              </div>
             </div>
           </>
         )}
@@ -420,6 +478,20 @@ function StepPhoto({ form, setForm, onNext, onBack }: {
 }) {
   const { imageHashes, addToast, registerHash } = useApp();
   const [showCamera, setShowCamera] = useState(false);
+  const stepFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleStepFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          handleCapture(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const { status, currentHash, checkResult, analyzeImage, reset } = useImageDuplicateDetector({
     knownHashes: imageHashes,
@@ -493,18 +565,39 @@ function StepPhoto({ form, setForm, onNext, onBack }: {
               )}
             </div>
           ) : (
-            <button
-              onClick={() => setShowCamera(true)}
-              className="w-full aspect-video flex flex-col items-center justify-center gap-4 hover:bg-white/4 transition-all group"
-            >
-              <div className="w-16 h-16 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Camera className="w-8 h-8 text-emerald-400" />
+            <div className="w-full aspect-video flex flex-col items-center justify-center gap-4 p-6">
+              <input
+                ref={stepFileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleStepFile}
+                className="hidden"
+              />
+              <div className="flex gap-4">
+                <button
+                  type="button"
+                  onClick={() => setShowCamera(true)}
+                  className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/40 transition-all group w-36"
+                >
+                  <div className="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Camera className="w-6 h-6 text-emerald-400" />
+                  </div>
+                  <span className="text-white/80 font-medium text-xs">Live Camera</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => stepFileInputRef.current?.click()}
+                  className="flex flex-col items-center justify-center gap-2.5 p-4 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-sky-500/40 transition-all group w-36"
+                >
+                  <div className="w-12 h-12 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Upload className="w-6 h-6 text-sky-400" />
+                  </div>
+                  <span className="text-white/80 font-medium text-xs">Upload Photo</span>
+                </button>
               </div>
-              <div className="text-center">
-                <p className="text-white/70 font-semibold text-sm">Tap to Open Camera</p>
-                <p className="text-white/35 text-xs mt-0.5">Live capture only — no file uploads</p>
-              </div>
-            </button>
+              <p className="text-white/40 text-xs">Capture live or upload animal picture from device</p>
+            </div>
           )}
         </DuplicateAwareUploadZone>
 

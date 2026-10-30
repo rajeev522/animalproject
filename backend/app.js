@@ -14,6 +14,7 @@ import donationRoutes from './routes/donation.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import statsRoutes from './routes/stats.routes.js';
 import adoptionRoutes from './routes/adoption.routes.js';
+import lostFoundRoutes from './routes/lostFound.routes.js';
 import errorHandler from './middlewares/errorHandler.js';
 
 const app = express();
@@ -25,10 +26,10 @@ app.use(cors({
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
 }));
 
-// Apply rate limiting (e.g. max 100 requests per 15 minutes per IP)
+// Apply rate limiting
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
-  max: 100,
+  max: 5000,
   message: { message: 'Too many requests, please try again later.' }
 });
 app.use('/api/', apiLimiter);
@@ -54,6 +55,7 @@ app.use('/api/donations', donationRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/adoptions', adoptionRoutes);
+app.use('/api/lost-found', lostFoundRoutes);
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date() });

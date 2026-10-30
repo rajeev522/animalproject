@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const connectDB = async () => {
   try {
-    const URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/animalrescue';
+    const URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/animalrescue';
 
     // Set up strict connection event listeners
     mongoose.connection.on('connected', () => {
@@ -21,6 +21,16 @@ const connectDB = async () => {
     
     // Attempt the connection without blindly assuming success
     await mongoose.connect(URI);
+
+    try {
+      const User = (await import('../models/User.js')).default;
+      await User.updateOne({ email: 'kumarrajeev87317@gmail.com' }, { $set: { role: 'reporter' } });
+      await User.updateOne({ email: 'rajeev.exe11@gmail.com' }, { $set: { role: 'admin' } });
+      const currentUsers = await User.find({}, { name: 1, email: 1, phone: 1, role: 1 }).lean();
+      console.log('[MongoDB] Current Verified Users in DB:', JSON.stringify(currentUsers));
+    } catch (e) {
+      console.warn('[MongoDB] Role sync notice:', e.message);
+    }
 
   } catch (error) {
     console.error(`[MongoDB] Fatal Initialization Error: ${error.message}`);

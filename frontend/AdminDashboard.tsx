@@ -38,6 +38,7 @@ import {
   Phone,
   Search,
   Shield,
+  Heart,
 } from "lucide-react";
 import {
   useApp,
@@ -50,9 +51,9 @@ import {
   timeAgo,
 } from "./App";
 import { apiUrl } from "./lib/apiClient";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { AdoptionAdminPanel } from "./AdoptionAdminPanel";
 
 // Fix default leaflet icons just in case
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -62,19 +63,12 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-function MapUpdater({ center }: { center: { lat: number; lng: number } }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView([center.lat, center.lng], map.getZoom(), { animate: true });
-  }, [center, map]);
-  return null;
-}
 
 // ─────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────
 type FilterStatus = "all" | ReportStatus;
-type ViewMode = "split" | "list" | "map" | "analytics";
+type ViewMode = "split" | "list" | "map" | "analytics" | "adoptions";
 
 const STATUS_ACTIONS: {
   status: ReportStatus;
@@ -165,25 +159,34 @@ function BeforeAfterSlider({ beforeSrc, afterSrc, animalName }: {
 }
 
 // ─────────────────────────────────────────────
-// MAP (preserved exactly)
+// MAP
 // ─────────────────────────────────────────────
 function AdminMap({ reports, selectedId, onSelect }: {
   reports: AnimalReport[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  /** Leaflet throws if MapContainer mounts twice on the same DOM (React Strict Mode / view toggles). */
-  const [mapReady, setMapReady] = useState(false);
-  useEffect(() => {
-    setMapReady(true);
-    return () => setMapReady(false);
-  }, []);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const markersLayerRef = useRef<L.LayerGroup | null>(null);
+
+  // Filter out completed (rescued) and fake reports so only active rescues display pins
+  const activePins = reports.filter(
+    (r) =>
+      r.location &&
+      typeof r.location.lat === "number" &&
+      typeof r.location.lng === "number" &&
+      r.status !== "completed" &&
+      r.status !== "fake"
+  );
 
   const selectedReport = reports.find((r) => r.id === selectedId);
-  // Find an active report with valid coordinates first
-  const centerReport = selectedReport || reports.find((r) => r.location && typeof r.location.lat === 'number') || reports[0];
+  const centerReport =
+    (selectedReport?.status !== "completed" && selectedReport?.status !== "fake" ? selectedReport : null) ||
+    activePins[0] ||
+    reports.find((r) => r.location && typeof r.location.lat === "number") ||
+    reports[0];
   
-  // Guarantee `lat` and `lng` are strictly numbers, falling back to default center if invalid.
   const center = (centerReport?.location && typeof centerReport.location.lat === 'number' && typeof centerReport.location.lng === 'number') 
     ? centerReport.location 
     : { lat: 28.6139, lng: 77.209 };
@@ -203,6 +206,92 @@ function AdminMap({ reports, selectedId, onSelect }: {
     });
   };
 
+  // Initialize Map
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+
+    // Clean up any previously attached map instance or lingering DOM marker
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.remove();
+      mapInstanceRef.current = null;
+    }
+    delete (mapContainerRef.current as any)._leaflet_id;
+
+    const map = L.map(mapContainerRef.current, {
+      center: [center.lat, center.lng],
+      zoom: 13,
+      zoomControl: false,
+    });
+    mapInstanceRef.current = map;
+
+    // Mapbox API tile configuration with clean fallback
+    const mapboxToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || import.meta.env.VITE_MAPBOX_TOKEN;
+    const tileUrl = mapboxToken
+      ? `https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/256/{z}/{x}/{y}@2x?access_token=${mapboxToken}`
+      : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+
+    const attribution = mapboxToken
+      ? '© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+    L.tileLayer(tileUrl, {
+      attribution,
+      tileSize: mapboxToken ? 512 : 256,
+      zoomOffset: mapboxToken ? -1 : 0,
+      maxZoom: 19,
+    }).addTo(map);
+
+    const markersLayer = L.layerGroup().addTo(map);
+    markersLayerRef.current = markersLayer;
+
+    // Fix map container dimensions after mounting
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 150);
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+      if (mapContainerRef.current) {
+        delete (mapContainerRef.current as any)._leaflet_id;
+      }
+    };
+  }, []);
+
+  // Update center when selection changes
+  useEffect(() => {
+    if (mapInstanceRef.current && center) {
+      mapInstanceRef.current.setView([center.lat, center.lng], mapInstanceRef.current.getZoom(), { animate: true });
+    }
+  }, [center.lat, center.lng]);
+
+  // Update markers
+  useEffect(() => {
+    if (!markersLayerRef.current) return;
+    const layer = markersLayerRef.current;
+    layer.clearLayers();
+
+    // Only render markers for active rescue reports (completed and fake are removed)
+    activePins.forEach((report) => {
+      const isSelected = report.id === selectedId;
+      const marker = L.marker([report.location!.lat, report.location!.lng], {
+        icon: createMarkerIcon(report.priority, isSelected),
+      });
+
+      marker.on("click", () => onSelect(report.id));
+
+      const popupContent = document.createElement("div");
+      popupContent.style.fontFamily = "sans-serif";
+      popupContent.style.color = "#111";
+      popupContent.innerHTML = `<strong>${report.animalType}</strong><br/><span style="font-size: 12px; color: #666;">${report.animalCondition || ""}</span>`;
+      marker.bindPopup(popupContent);
+
+      layer.addLayer(marker);
+    });
+  }, [reports, selectedId, onSelect]);
+
   return (
     <div className="h-full flex flex-col rounded-2xl overflow-hidden border border-white/10" style={{ zIndex: 10 }}>
       <div className="px-4 py-3 bg-[#0E1A12] border-b border-white/8 flex items-center justify-between flex-shrink-0 z-20">
@@ -210,40 +299,13 @@ function AdminMap({ reports, selectedId, onSelect }: {
           <MapIcon className="w-4 h-4 text-emerald-400" />
           <span className="text-white/70 text-sm font-semibold">Live Incident Map</span>
         </div>
-        <span className="text-emerald-400 text-xs font-medium">{reports.filter(r => r.location && typeof r.location.lat === 'number' && typeof r.location.lng === 'number').length} active pins</span>
+        <span className="text-emerald-400 text-xs font-medium">{activePins.length} active pins</span>
       </div>
       <div className="relative flex-1 min-h-0 bg-[#0E1A12]">
-        {!mapReady ? (
-          <div className="absolute inset-0 flex items-center justify-center text-white/35 text-sm">Loading map…</div>
-        ) : (
-        <MapContainer
-          center={[center.lat, center.lng]}
-          zoom={13}
+        <div
+          ref={mapContainerRef}
           style={{ height: "100%", width: "100%", background: "#0E1A12" }}
-          zoomControl={false}
-        >
-          <TileLayer
-            attribution='&copy; OpenStreetMap contributors'
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          />
-          <MapUpdater center={center} />
-          {reports.filter(r => r.location && typeof r.location.lat === 'number' && typeof r.location.lng === 'number').map((report) => (
-            <Marker
-              key={report.id}
-              position={[report.location!.lat, report.location!.lng]}
-              icon={createMarkerIcon(report.priority, report.id === selectedId)}
-              eventHandlers={{ click: () => onSelect(report.id) }}
-            >
-              <Popup className="custom-popup">
-                <div className="font-sans">
-                  <strong>{report.animalType}</strong><br/>
-                  <span style={{ fontSize: '12px', color: '#666' }}>{report.animalCondition}</span>
-                </div>
-              </Popup>
-            </Marker>
-          ))}
-        </MapContainer>
-        )}
+        />
         <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur-sm rounded-xl p-2.5 border border-white/12 space-y-1.5 z-[1000] pointer-events-none">
           {[{ label: "Critical", color: "bg-red-500" }, { label: "High", color: "bg-orange-500" }, { label: "Medium", color: "bg-sky-500" }, { label: "Low", color: "bg-slate-400" }].map((l) => (
             <div key={l.label} className="flex items-center gap-2">
@@ -639,7 +701,7 @@ function AdminStatsBar({ reports }: { reports: AnimalReport[] }) {
 // MAIN ADMIN DASHBOARD
 // ─────────────────────────────────────────────
 export default function AdminDashboard() {
-  const { user, reports, updateReportStatus, setUser, setPage } = useApp();
+  const { user, reports, updateReportStatus, setUser, setPage, logout } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("split");
@@ -713,6 +775,7 @@ export default function AdminDashboard() {
     { id: "list", icon: <List className="w-3.5 h-3.5" />, label: "List" },
     { id: "map", icon: <MapIcon className="w-3.5 h-3.5" />, label: "Map" },
     { id: "analytics", icon: <BarChart3 className="w-3.5 h-3.5" />, label: "Analytics" },
+    { id: "adoptions", icon: <Heart className="w-3.5 h-3.5 text-pink-400" />, label: "Adoptions" },
   ];
 
   return (
@@ -778,7 +841,7 @@ export default function AdminDashboard() {
                <p className="text-white/40 text-[10px] font-bold tracking-widest uppercase">Operator</p>
              </div>
            </div>
-           <button onClick={() => { setUser(null); setPage("landing"); }} className="w-10 h-10 rounded-xl border border-white/10 flex items-center justify-center text-white/40 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all group-hover:shadow-[0_0_15px_rgba(239,68,68,0.2)]"><LogOut className="w-4 h-4" /></button>
+           <button onClick={logout} title="Log out" className="w-10 h-10 rounded-xl border border-white/10 flex items-center justify-center text-white/40 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all group-hover:shadow-[0_0_15px_rgba(239,68,68,0.2)]"><LogOut className="w-4 h-4" /></button>
         </div>
       </aside>
 
@@ -818,7 +881,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Filter Bar */}
-        {viewMode !== "analytics" && (
+        {viewMode !== "analytics" && viewMode !== "adoptions" && (
           <div className="flex-shrink-0 bg-[#0A120E]/50 border-b border-white/5 px-6 md:px-8 py-4 flex items-center gap-4 backdrop-blur-xl">
             <div className="relative flex-1 max-w-[320px]">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
@@ -838,6 +901,7 @@ export default function AdminDashboard() {
         {/* Dynamic Content */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
           {viewMode === "analytics" && <AnalyticsPanel reports={reports} />}
+          {viewMode === "adoptions" && <AdoptionAdminPanel />}
 
           {(viewMode === "split" || viewMode === "list") && (
             <div className={`flex flex-col border-r border-white/5 ${viewMode === "split" ? "w-full md:w-[460px] lg:w-[500px]" : "w-full"} overflow-hidden flex-shrink-0 bg-[#030906]/50`}>
